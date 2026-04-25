@@ -1,0 +1,244 @@
+// GifStudio-X - Prisma schema
+// Etape 10.4 : ajout shareSlug sur VideoAsset pour acces public via lien
+
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  moderator
+  user
+}
+
+enum VideoAssetSource {
+  url_import
+  file_upload
+  crawler
+}
+
+enum VideoAssetStatus {
+  pending
+  downloading
+  ready
+  failed
+}
+
+enum CrawlerAdapter {
+  reddit
+  redgifs
+  rule34
+  e621
+  generic_html
+}
+
+enum CrawlerRunStatus {
+  pending
+  running
+  success
+  failed
+}
+
+enum CrawlerResultStatus {
+  pending_review
+  approved
+  rejected
+  imported
+  import_failed
+}
+
+model User {
+  id                 String   @id @default(uuid()) @db.Uuid
+  email              String   @unique @db.VarChar(255)
+  passwordHash       String   @map("password_hash") @db.VarChar(255)
+  role               UserRole @default(user)
+  mustChangePassword Boolean  @default(false) @map("must_change_password")
+  isActive           Boolean  @default(true) @map("is_active")
+  lastLoginAt        DateTime? @map("last_login_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  gifs           Gif[]
+  collections    Collection[]
+  videoAssets    VideoAsset[]
+  crawlerSources CrawlerSource[]
+
+  @@map("users")
+}
+
+model Gif {
+  id            String   @id @default(uuid()) @db.Uuid
+  slug          String   @unique @db.VarChar(16)
+  title         String   @db.VarChar(255)
+  description   String?  @db.Text
+  filePath      String   @map("file_path") @db.VarChar(500)
+  thumbnailPath String   @map("thumbnail_path") @db.VarChar(500)
+  width         Int
+  height        Int
+  durationMs    Int      @map("duration_ms")
+  fps           Int
+  fileSize      BigInt   @map("file_size")
+  views         Int      @default(0)
+  isPublic      Boolean  @default(false) @map("is_public")
+  ownerId       String   @map("owner_id") @db.Uuid
+  tags          String[] @default([])
+  metadata      Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  owner       User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  collections CollectionGif[]
+  categories  GifCategory[]
+
+  @@index([slug])
+  @@index([createdAt(sort: Desc)])
+  @@index([tags], type: Gin)
+  @@map("gifs")
+}
+
+model Collection {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  isPublic    Boolean  @default(false) @map("is_public")
+  ownerId     String   @map("owner_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  owner User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  gifs  CollectionGif[]
+
+  @@map("collections")
+}
+
+model CollectionGif {
+  collectionId String   @map("collection_id") @db.Uuid
+  gifId        String   @map("gif_id") @db.Uuid
+  addedAt      DateTime @default(now()) @map("added_at")
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  gif        Gif        @relation(fields: [gifId], references: [id], onDelete: Cascade)
+
+  @@id([collectionId, gifId])
+  @@map("collection_gifs")
+}
+
+model Category {
+  id   String @id @default(uuid()) @db.Uuid
+  name String @unique @db.VarChar(100)
+  slug String @unique @db.VarChar(100)
+
+  gifs GifCategory[]
+
+  @@map("categories")
+}
+
+model GifCategory {
+  gifId      String @map("gif_id") @db.Uuid
+  categoryId String @map("category_id") @db.Uuid
+
+  gif      Gif      @relation(fields: [gifId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([gifId, categoryId])
+  @@map("gif_categories")
+}
+
+model VideoAsset {
+  id               String            @id @default(uuid()) @db.Uuid
+  source           VideoAssetSource
+  sourceUrl        String?           @map("source_url") @db.Text
+  originalFilename String?           @map("original_filename") @db.VarChar(500)
+
+  localPath        String?           @map("local_path") @db.VarChar(500)
+  thumbnailPath    String?           @map("thumbnail_path") @db.VarChar(500)
+  fileSizeBytes    BigInt?           @map("file_size_bytes")
+
+  mimeType         String?           @map("mime_type") @db.VarChar(100)
+  durationSec      Float?            @map("duration_sec")
+  width            Int?
+  height           Int?
+  videoCodec       String?           @map("video_codec") @db.VarChar(50)
+  audioCodec       String?           @map("audio_codec") @db.VarChar(50)
+
+  status           VideoAssetStatus  @default(pending)
+  errorMessage     String?           @map("error_message") @db.Text
+
+  /// Slug aleatoire pour acces via lien partageable (sans auth).
+  /// Permanent jusqu'a revocation manuelle. Unique sur les non-null.
+  shareSlug        String?           @unique @map("share_slug") @db.VarChar(32)
+
+  importedById     String            @map("imported_by_id") @db.Uuid
+  importedBy       User              @relation(fields: [importedById], references: [id], onDelete: Cascade)
+
+  crawlerResults   CrawlerResult[]
+
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  downloadedAt     DateTime?         @map("downloaded_at")
+
+  @@index([status])
+  @@index([source])
+  @@index([importedById])
+  @@index([createdAt(sort: Desc)])
+  @@map("video_assets")
+}
+
+model CrawlerSource {
+  id                String             @id @default(uuid()) @db.Uuid
+  name              String             @db.VarChar(255)
+  adapter           CrawlerAdapter
+  config            Json               @default("{}")
+  cronExpression    String             @map("cron_expression") @db.VarChar(100)
+  enabled           Boolean            @default(true)
+  maxResultsPerRun  Int                @default(20) @map("max_results_per_run")
+
+  lastRunAt         DateTime?          @map("last_run_at")
+  lastRunStatus     CrawlerRunStatus?  @map("last_run_status")
+  lastRunMessage    String?            @map("last_run_message") @db.Text
+
+  createdById       String             @map("created_by_id") @db.Uuid
+  createdBy         User               @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  results           CrawlerResult[]
+
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  @@index([adapter])
+  @@index([enabled])
+  @@map("crawler_sources")
+}
+
+model CrawlerResult {
+  id                    String                @id @default(uuid()) @db.Uuid
+  crawlerSourceId       String                @map("crawler_source_id") @db.Uuid
+  crawlerSource         CrawlerSource         @relation(fields: [crawlerSourceId], references: [id], onDelete: Cascade)
+
+  sourceUrl             String                @map("source_url") @db.Text
+  thumbnailUrl          String?               @map("thumbnail_url") @db.Text
+  title                 String?               @db.VarChar(500)
+  externalId            String?               @map("external_id") @db.VarChar(255)
+  metadata              Json                  @default("{}")
+
+  status                CrawlerResultStatus   @default(pending_review)
+  rejectedAt            DateTime?             @map("rejected_at")
+
+  importedVideoAssetId  String?               @map("imported_video_asset_id") @db.Uuid
+  importedVideoAsset    VideoAsset?           @relation(fields: [importedVideoAssetId], references: [id], onDelete: SetNull)
+  importErrorMessage    String?               @map("import_error_message") @db.Text
+
+  discoveredAt          DateTime              @default(now()) @map("discovered_at")
+  reviewedAt            DateTime?             @map("reviewed_at")
+
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([crawlerSourceId])
+  @@index([discoveredAt(sort: Desc)])
+  @@map("crawler_results")
+}

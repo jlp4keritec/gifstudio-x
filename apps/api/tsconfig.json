@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "rootDir": "../../",
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": true,
+    "isolatedModules": true,
+    "noEmitOnError": false,
+    "types": ["node"],
+    "paths": {
+      "@gifstudio-x/shared": ["../../packages/shared/src/index.ts"],
+      "@gifstudio-x/shared/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "../../packages/shared/src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "prisma"
+  ]
+}
