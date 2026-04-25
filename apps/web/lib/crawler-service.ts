@@ -26,6 +26,22 @@ export interface ListResultsFilters {
   limit?: number;
 }
 
+export interface GenericHtmlTestResult {
+  pageTitle: string;
+  htmlSize: number;
+  cssMatchCount: number;
+  regexMatchCount: number;
+  rawUrls: string[];
+  filteredUrls: string[];
+  items: Array<{
+    sourceUrl: string;
+    thumbnailUrl: string | null;
+    title: string | null;
+    metadata: unknown;
+  }>;
+  warnings: string[];
+}
+
 export const crawlerService = {
   async listAdapters(): Promise<CrawlerAdapterInfo[]> {
     const data = await apiFetch<{ adapters: CrawlerAdapterInfo[] }>(
@@ -68,6 +84,13 @@ export const crawlerService = {
       `/admin/crawler/sources/${id}/run`,
       { method: 'POST' },
     );
+  },
+
+  async testGenericHtml(config: Record<string, unknown>): Promise<GenericHtmlTestResult> {
+    return apiFetch<GenericHtmlTestResult>('/admin/crawler/test-generic-html', {
+      method: 'POST',
+      json: { config },
+    });
   },
 
   async listResults(filters: ListResultsFilters = {}): Promise<{
@@ -119,11 +142,6 @@ export const crawlerService = {
     });
   },
 
-  /**
-   * URL proxy pour la thumbnail d'un CrawlerResult.
-   * Le backend telecharge l'image distante (avec Referer/UA appropries)
-   * et la stream au navigateur, contournant les blocages hotlink.
-   */
   thumbnailUrl(resultId: string): string {
     return `${API_BASE_URL}/admin/crawler/results/${resultId}/thumbnail`;
   },

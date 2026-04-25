@@ -3,7 +3,11 @@ import { z } from 'zod';
 
 import { prisma } from '../lib/prisma';
 import { AppError } from '../middlewares/error-handler';
-import { getAdapter, listImplementedAdapters } from '../services/crawler/registry';
+import {
+  getAdapter,
+  getGenericHtmlAdapter,
+  listImplementedAdapters,
+} from '../services/crawler/registry';
 import { validateCronMinInterval } from '../lib/cron-validator';
 import { enqueueCrawlerRun } from '../workers/crawler-queue';
 
@@ -26,12 +30,15 @@ const baseSourceSchema = z.object({
 
 const updateSourceSchema = baseSourceSchema.partial();
 
+const testGenericHtmlSchema = z.object({
+  config: z.record(z.unknown()),
+});
+
 function validateSourceInput(data: {
   adapter: string;
   config: Record<string, unknown>;
   cronExpression: string;
 }): void {
-  // Cron min 15 min
   const cronCheck = validateCronMinInterval(data.cronExpression);
   if (!cronCheck.valid) {
     throw new AppError(
@@ -41,17 +48,15 @@ function validateSourceInput(data: {
     );
   }
 
-  // Adapter implemente ?
   const implemented = listImplementedAdapters();
   if (!implemented.includes(data.adapter as (typeof implemented)[number])) {
     throw new AppError(
       400,
-      `Adaptateur "${data.adapter}" non implemente pour l'instant (prevu etape 10.x)`,
+      `Adaptateur "${data.adapter}" non implemente`,
       'ADAPTER_NOT_IMPLEMENTED',
     );
   }
 
-  // Config valide pour cet adapter ?
   try {
     getAdapter(data.adapter as (typeof implemented)[number]).validateConfig(data.config);
   } catch (err) {
@@ -184,9 +189,6 @@ export async function deleteSource(req: Request, res: Response, next: NextFuncti
   }
 }
 
-/**
- * Declenche un run immediat (enqueue dans pg-boss).
- */
 export async function triggerSourceRun(req: Request, res: Response, next: NextFunction) {
   try {
     const id = String(req.params.id);
@@ -200,9 +202,6 @@ export async function triggerSourceRun(req: Request, res: Response, next: NextFu
   }
 }
 
-/**
- * Retourne la liste des adaptateurs implementes + ceux prevus.
- */
 export async function listAdapters(_req: Request, res: Response, next: NextFunction) {
   try {
     const implemented = listImplementedAdapters();
@@ -217,6 +216,25 @@ export async function listAdapters(_req: Request, res: Response, next: NextFunct
       },
     });
   } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /admin/crawler/test-generic-html
+ * Execute le GenericHtmlAdapter.testRun() sans inserer en BDD.
+ * Permet de valider la config (selecteurs / regex) avant de creer la source.
+ */
+export async function testGenericHtml(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { config } = testGenericHtmlSchema.parse(req.body);
+    const adapter = getGenericHtmlAdapter();
+    const result = await adapter.testRun(config);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    if (err instanceof Error) {
+      return next(new AppError(400, err.message, 'TEST_FAILED'));
+    }
     next(err);
   }
 }

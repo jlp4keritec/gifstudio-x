@@ -16,6 +16,9 @@ router.patch('/sources/:id', sourcesCtl.updateSource);
 router.delete('/sources/:id', sourcesCtl.deleteSource);
 router.post('/sources/:id/run', sourcesCtl.triggerSourceRun);
 
+// Test a blanc d'une config GenericHTML (sans inserer en BDD)
+router.post('/test-generic-html', sourcesCtl.testGenericHtml);
+
 router.get('/results', resultsCtl.listResults);
 router.get('/results/:id/thumbnail', resultsCtl.getResultThumbnail);
 router.post('/results/:id/approve', resultsCtl.approveAndImport);
