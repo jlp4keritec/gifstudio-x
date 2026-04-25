@@ -28,6 +28,7 @@ import {
   Alert,
   Collapse,
   Snackbar,
+  Checkbox,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -49,7 +50,9 @@ import type {
 } from '@gifstudio-x/shared';
 import { videosService } from '@/lib/videos-service';
 import { ThumbnailHover } from '@/components/library/ThumbnailHover';
+import { BulkActionBar, BulkActionButton } from '@/components/library/BulkActionBar';
 import { useDraft } from '@/lib/draft-context';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 const EMPTY_FILTERS: VideoAssetFilters = {
   sort: 'date_desc',
@@ -123,6 +126,7 @@ function ShareSlugCell({
   onChanged: () => void;
   onError: (msg: string) => void;
 }) {
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
 
   if (video.status !== 'ready') {
@@ -144,7 +148,13 @@ function ShareSlugCell({
 
   const handleRevoke = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Revoquer ce lien de partage ? Toute personne ayant l\'URL perdra l\'acces.')) return;
+    const ok = await confirm({
+      title: 'Revoquer le lien',
+      message: 'Toute personne ayant deja l\'URL perdra l\'acces a la video. Continuer ?',
+      tone: 'danger',
+      confirmLabel: 'Revoquer',
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await videosService.revokeShareSlug(video.id);
@@ -210,6 +220,7 @@ function ShareSlugCell({
 export default function LibraryPage() {
   const router = useRouter();
   const { setSourceVideo } = useDraft();
+  const confirm = useConfirm();
   const [items, setItems] = useState<VideoAsset[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -217,6 +228,11 @@ export default function LibraryPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [snack, setSnack] = useState<string | null>(null);
   const [regenLoading, setRegenLoading] = useState(false);
+
+  // Selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectAllFiltered, setSelectAllFiltered] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const [searchInput, setSearchInput] = useState('');
   useEffect(() => {
@@ -243,9 +259,21 @@ export default function LibraryPage() {
     void fetchList();
   }, [fetchList]);
 
+  useEffect(() => {
+    if (!selectAllFiltered) {
+      setSelectedIds(new Set());
+    }
+  }, [filters.search, filters.status, filters.source, filters.dateFrom, filters.dateTo,
+      filters.durationMin, filters.durationMax, filters.minWidth, filters.minHeight,
+      filters.sort, selectAllFiltered]);
+
   const handleDelete = async (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (!confirm('Supprimer cette video ?')) return;
+    const ok = await confirm({
+      message: 'Supprimer cette video ? Le fichier sera definitivement supprime du disque.',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await videosService.remove(id);
       await fetchList();
@@ -255,7 +283,11 @@ export default function LibraryPage() {
   };
 
   const handleRegenerateAll = async () => {
-    if (!confirm('Regenerer les thumbnails manquantes ?')) return;
+    const ok = await confirm({
+      title: 'Regenerer les thumbnails',
+      message: 'Regenerer les thumbnails manquantes pour toutes les videos eligibles ?',
+    });
+    if (!ok) return;
     setRegenLoading(true);
     try {
       const r = await videosService.regenerateAllThumbnails();
@@ -270,14 +302,6 @@ export default function LibraryPage() {
     }
   };
 
-  /**
-   * Cree (ou reutilise) un slug pour la video, puis route vers /create/edit
-   * en injectant la video dans le DraftContext sous forme d'UploadedVideo.
-   *
-   * IMPORTANT : l'editeur passe l'URL via getStorageUrl() qui prefixe l'origin
-   * de l'API. On doit donc fournir un chemin RELATIF "/api/v1/videos/file/SLUG"
-   * et non l'URL complete, sinon double-prefixage.
-   */
   const openInEditor = useCallback(
     async (video: VideoAsset) => {
       if (video.status !== 'ready' || !video.localPath) {
@@ -291,7 +315,6 @@ export default function LibraryPage() {
           const r = await videosService.createShareSlug(video.id);
           slug = r.shareSlug;
         }
-        // Chemin relatif (sera prefixe par getStorageUrl cote editeur)
         const relativePath = `/api/v1/videos/file/${slug}`;
         const uploaded: UploadedVideo = {
           id: video.id,
@@ -311,6 +334,86 @@ export default function LibraryPage() {
     },
     [router, setSourceVideo],
   );
+
+  const toggleOne = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSelectAllFiltered(false);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const visibleIds = useMemo(() => items.map((i) => i.id), [items]);
+
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const someVisibleSelected = !allVisibleSelected && visibleIds.some((id) => selectedIds.has(id));
+
+  const toggleAllVisible = () => {
+    setSelectAllFiltered(false);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const selectAllFilteredItems = async () => {
+    setBulkBusy(true);
+    try {
+      const data = await videosService.listAdvanced({
+        ...filters,
+        offset: 0,
+        limit: 500,
+      });
+      setSelectedIds(new Set(data.items.map((i) => i.id)));
+      setSelectAllFiltered(true);
+      if (data.total > 500) {
+        setSnack(`Selection limitee aux 500 premiers resultats (sur ${data.total})`);
+      }
+    } catch (err) {
+      setSnack(`Erreur : ${(err as Error).message}`);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+    setSelectAllFiltered(false);
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    const ok = await confirm({
+      title: 'Suppression en lot',
+      message: `Supprimer ${ids.length} video${ids.length > 1 ? 's' : ''} ? Les fichiers seront definitivement supprimes du disque.`,
+      tone: 'danger',
+      confirmLabel: `Supprimer ${ids.length}`,
+    });
+    if (!ok) return;
+    setBulkBusy(true);
+    try {
+      const result = await videosService.bulkDelete(ids);
+      const baseMsg = `${result.succeeded} supprimee${result.succeeded > 1 ? 's' : ''}`;
+      const errMsg = result.failed > 0 ? ` / ${result.failed} echec${result.failed > 1 ? 's' : ''}` : '';
+      setSnack(baseMsg + errMsg);
+      clearSelection();
+      await fetchList();
+    } catch (err) {
+      setSnack(`Erreur : ${(err as Error).message}`);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const resetFilters = () => {
     setSearchInput('');
@@ -478,6 +581,25 @@ export default function LibraryPage() {
           </Collapse>
         </Paper>
 
+        <BulkActionBar
+          selectedCount={selectedIds.size}
+          totalCount={total}
+          visibleCount={visibleIds.length}
+          allFilteredSelected={selectAllFiltered}
+          onSelectAllFiltered={selectAllFilteredItems}
+          onClear={clearSelection}
+          actions={
+            <BulkActionButton
+              onClick={() => void handleBulkDelete()}
+              disabled={bulkBusy}
+              color="error"
+              startIcon={<DeleteIcon fontSize="small" />}
+            >
+              Supprimer
+            </BulkActionButton>
+          }
+        />
+
         <Paper>
           {loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
@@ -491,6 +613,13 @@ export default function LibraryPage() {
                 <Table size="small">
                   <TableHead>
                     <TableRow>
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          indeterminate={someVisibleSelected}
+                          checked={allVisibleSelected}
+                          onChange={toggleAllVisible}
+                        />
+                      </TableCell>
                       <TableCell width={40}></TableCell>
                       <TableCell>Statut</TableCell>
                       <TableCell>Source</TableCell>
@@ -507,15 +636,23 @@ export default function LibraryPage() {
                   <TableBody>
                     {items.map((v) => {
                       const isReady = v.status === 'ready';
+                      const isSelected = selectedIds.has(v.id);
                       return (
                         <TableRow
                           key={v.id}
                           hover
+                          selected={isSelected}
                           onClick={isReady ? () => void openInEditor(v) : undefined}
                           sx={{
                             cursor: isReady ? 'pointer' : 'default',
                           }}
                         >
+                          <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              checked={isSelected}
+                              onChange={(e) => toggleOne(v.id, e as unknown as React.MouseEvent)}
+                            />
+                          </TableCell>
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <ThumbnailHover
                               videoId={v.id}
@@ -600,7 +737,7 @@ export default function LibraryPage() {
 
       <Snackbar
         open={Boolean(snack)}
-        autoHideDuration={4000}
+        autoHideDuration={5000}
         onClose={() => setSnack(null)}
         message={snack}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}

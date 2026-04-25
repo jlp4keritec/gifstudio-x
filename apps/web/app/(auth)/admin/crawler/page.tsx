@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Box,
@@ -31,6 +31,7 @@ import {
   Popper,
   Paper as MuiPaper,
   Fade,
+  Checkbox,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
@@ -52,10 +53,11 @@ import type {
 import { crawlerService } from '@/lib/crawler-service';
 import { useAuth } from '@/lib/auth-context';
 import { CrawlerSourceDialog } from '@/components/crawler/CrawlerSourceDialog';
+import { BulkActionBar, BulkActionButton } from '@/components/library/BulkActionBar';
+import { useConfirm } from '@/components/ui/ConfirmDialog';
 
 type TabKey = 'sources' | 'results';
 
-// Polling : refetch toutes les 10s tant que la page est ouverte
 const POLL_INTERVAL_MS = 10_000;
 
 function statusColor(s: string): 'default' | 'success' | 'warning' | 'error' | 'info' {
@@ -153,6 +155,7 @@ function ResultThumbnail({ resultId, hasThumbnail }: { resultId: string; hasThum
 export default function CrawlerAdminPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<TabKey>('sources');
 
   const [adapters, setAdapters] = useState<CrawlerAdapterInfo[]>([]);
@@ -172,6 +175,10 @@ export default function CrawlerAdminPage() {
     offset: number;
     limit: number;
   }>({ offset: 0, limit: 25 });
+
+  const [selectedResultIds, setSelectedResultIds] = useState<Set<string>>(new Set());
+  const [selectAllFilteredResults, setSelectAllFilteredResults] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const [snack, setSnack] = useState<string | null>(null);
 
@@ -200,10 +207,6 @@ export default function CrawlerAdminPage() {
     }
   }, [resultsFilter]);
 
-  /**
-   * Refetch leger : juste le total (1 ligne, sans charger 25 items)
-   * Utilise pour mettre a jour le compteur de l'onglet quand on est sur Sources.
-   */
   const refreshResultsCount = useCallback(async () => {
     try {
       const data = await crawlerService.listResults({ limit: 1, offset: 0 });
@@ -217,19 +220,21 @@ export default function CrawlerAdminPage() {
     crawlerService.listAdapters().then(setAdapters).catch(console.error);
   }, []);
 
-  // Au mount : charger sources + total resultats (compteur d'onglet)
   useEffect(() => {
     void fetchSources();
     void refreshResultsCount();
   }, [fetchSources, refreshResultsCount]);
 
-  // Quand on bascule sur l'onglet Resultats : charger la liste complete
   useEffect(() => {
     if (tab === 'results') void fetchResults();
   }, [tab, fetchResults]);
 
-  // Polling : tant que la page est ouverte, on refresh sources + compteur toutes les 10s
-  // pour voir les status crawler evoluer en temps reel
+  useEffect(() => {
+    if (!selectAllFilteredResults) {
+      setSelectedResultIds(new Set());
+    }
+  }, [resultsFilter.status, resultsFilter.sourceId, resultsFilter.search, selectAllFilteredResults]);
+
   useEffect(() => {
     const interval = setInterval(() => {
       if (document.visibilityState !== 'visible') return;
@@ -253,8 +258,6 @@ export default function CrawlerAdminPage() {
     try {
       await crawlerService.triggerRun(id);
       setSnack('Run enqueued');
-      // Refresh sources tout de suite (status passe a "running")
-      // puis encore dans 3s pour voir le resultat final
       setTimeout(() => {
         void fetchSources();
         void refreshResultsCount();
@@ -273,10 +276,15 @@ export default function CrawlerAdminPage() {
     }
   };
 
-  const handleDeleteSource = async (id: string) => {
-    if (!confirm('Supprimer cette source ?')) return;
+  const handleDeleteSource = async (src: CrawlerSource) => {
+    const ok = await confirm({
+      title: 'Supprimer la source',
+      message: `Supprimer la source "${src.name}" ? Les resultats associes seront aussi supprimes (les videos deja importees restent).`,
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
-      await crawlerService.deleteSource(id);
+      await crawlerService.deleteSource(src.id);
       await fetchSources();
       await refreshResultsCount();
     } catch (err) {
@@ -315,12 +323,113 @@ export default function CrawlerAdminPage() {
   };
 
   const handleDeleteResult = async (id: string) => {
-    if (!confirm('Supprimer ce resultat ?')) return;
+    const ok = await confirm({
+      message: 'Supprimer ce resultat ? La video importee (si elle existe) ne sera pas supprimee.',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await crawlerService.deleteResult(id);
       await fetchResults();
     } catch (err) {
       setSnack(`Erreur : ${(err as Error).message}`);
+    }
+  };
+
+  const visibleResultIds = useMemo(() => results.map((r) => r.id), [results]);
+  const allVisibleSelected =
+    visibleResultIds.length > 0 && visibleResultIds.every((id) => selectedResultIds.has(id));
+  const someVisibleSelected =
+    !allVisibleSelected && visibleResultIds.some((id) => selectedResultIds.has(id));
+
+  const toggleResultOne = (id: string) => {
+    setSelectAllFilteredResults(false);
+    setSelectedResultIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    setSelectAllFilteredResults(false);
+    setSelectedResultIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleResultIds.forEach((id) => next.delete(id));
+      } else {
+        visibleResultIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const selectAllFiltered = async () => {
+    setBulkBusy(true);
+    try {
+      const data = await crawlerService.listResults({
+        ...resultsFilter,
+        offset: 0,
+        limit: 500,
+      });
+      setSelectedResultIds(new Set(data.items.map((i) => i.id)));
+      setSelectAllFilteredResults(true);
+      if (data.total > 500) {
+        setSnack(`Selection limitee aux 500 premiers resultats (sur ${data.total})`);
+      }
+    } catch (err) {
+      setSnack(`Erreur : ${(err as Error).message}`);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const clearResultsSelection = () => {
+    setSelectedResultIds(new Set());
+    setSelectAllFilteredResults(false);
+  };
+
+  const runBulkAction = async (action: 'delete' | 'reject' | 'approve') => {
+    const ids = Array.from(selectedResultIds);
+    if (ids.length === 0) return;
+
+    const labels: Record<typeof action, { title: string; verb: string; tone: 'danger' | 'default' }> = {
+      delete: { title: 'Suppression en lot', verb: 'Supprimer', tone: 'danger' },
+      reject: { title: 'Rejet en lot', verb: 'Rejeter', tone: 'default' },
+      approve: { title: 'Import en lot', verb: 'Approuver et importer', tone: 'default' },
+    };
+    const cfg = labels[action];
+
+    let warning = '';
+    if (action === 'approve' && ids.length > 5) {
+      warning = ` (${ids.length} telechargements lances en parallele)`;
+    }
+
+    const ok = await confirm({
+      title: cfg.title,
+      message: `${cfg.verb} ${ids.length} resultat${ids.length > 1 ? 's' : ''} ?${warning}`,
+      tone: cfg.tone,
+      confirmLabel: `${cfg.verb} ${ids.length}`,
+    });
+    if (!ok) return;
+
+    setBulkBusy(true);
+    try {
+      if (action === 'approve') {
+        setSnack(`Import en cours (${ids.length} videos, peut prendre plusieurs minutes)...`);
+      }
+      const result = await crawlerService.bulkAction(ids, action);
+      const baseMsg = `${result.succeeded} OK`;
+      const errMsg = result.failed > 0 ? ` / ${result.failed} echec${result.failed > 1 ? 's' : ''}` : '';
+      setSnack(`${cfg.verb} : ${baseMsg}${errMsg}`);
+      clearResultsSelection();
+      await fetchResults();
+      await refreshResultsCount();
+    } catch (err) {
+      setSnack(`Erreur : ${(err as Error).message}`);
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -454,7 +563,7 @@ export default function CrawlerAdminPage() {
                             </IconButton>
                           </Tooltip>
                           <Tooltip title="Supprimer">
-                            <IconButton size="small" onClick={() => void handleDeleteSource(s.id)} color="error">
+                            <IconButton size="small" onClick={() => void handleDeleteSource(s)} color="error">
                               <DeleteIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
@@ -529,6 +638,43 @@ export default function CrawlerAdminPage() {
                 </IconButton>
               </Stack>
 
+              <BulkActionBar
+                selectedCount={selectedResultIds.size}
+                totalCount={resultsTotal}
+                visibleCount={visibleResultIds.length}
+                allFilteredSelected={selectAllFilteredResults}
+                onSelectAllFiltered={selectAllFiltered}
+                onClear={clearResultsSelection}
+                actions={
+                  <>
+                    <BulkActionButton
+                      onClick={() => void runBulkAction('approve')}
+                      disabled={bulkBusy}
+                      color="success"
+                      startIcon={<CheckIcon fontSize="small" />}
+                    >
+                      Approuver
+                    </BulkActionButton>
+                    <BulkActionButton
+                      onClick={() => void runBulkAction('reject')}
+                      disabled={bulkBusy}
+                      color="warning"
+                      startIcon={<BlockIcon fontSize="small" />}
+                    >
+                      Rejeter
+                    </BulkActionButton>
+                    <BulkActionButton
+                      onClick={() => void runBulkAction('delete')}
+                      disabled={bulkBusy}
+                      color="error"
+                      startIcon={<DeleteIcon fontSize="small" />}
+                    >
+                      Supprimer
+                    </BulkActionButton>
+                  </>
+                }
+              />
+
               {resultsLoading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
                   <CircularProgress />
@@ -540,6 +686,13 @@ export default function CrawlerAdminPage() {
                   <Table size="small">
                     <TableHead>
                       <TableRow>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            indeterminate={someVisibleSelected}
+                            checked={allVisibleSelected}
+                            onChange={toggleAllVisible}
+                          />
+                        </TableCell>
                         <TableCell width={100}>Preview</TableCell>
                         <TableCell>Titre</TableCell>
                         <TableCell>Source</TableCell>
@@ -549,87 +702,96 @@ export default function CrawlerAdminPage() {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {results.map((r) => (
-                        <TableRow key={r.id} hover>
-                          <TableCell>
-                            <ResultThumbnail
-                              resultId={r.id}
-                              hasThumbnail={Boolean(r.thumbnailUrl)}
-                            />
-                          </TableCell>
-                          <TableCell sx={{ maxWidth: 320 }}>
-                            <Stack spacing={0.5}>
-                              <Typography variant="body2" noWrap>
-                                {r.title || '—'}
+                      {results.map((r) => {
+                        const isSelected = selectedResultIds.has(r.id);
+                        return (
+                          <TableRow key={r.id} hover selected={isSelected}>
+                            <TableCell padding="checkbox">
+                              <Checkbox
+                                checked={isSelected}
+                                onChange={() => toggleResultOne(r.id)}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <ResultThumbnail
+                                resultId={r.id}
+                                hasThumbnail={Boolean(r.thumbnailUrl)}
+                              />
+                            </TableCell>
+                            <TableCell sx={{ maxWidth: 320 }}>
+                              <Stack spacing={0.5}>
+                                <Typography variant="body2" noWrap>
+                                  {r.title || '—'}
+                                </Typography>
+                                <Tooltip title={r.sourceUrl}>
+                                  <Typography variant="caption" color="text.secondary" noWrap>
+                                    {r.sourceUrl}
+                                  </Typography>
+                                </Tooltip>
+                                {r.importErrorMessage && (
+                                  <Typography variant="caption" color="error" noWrap>
+                                    {r.importErrorMessage}
+                                  </Typography>
+                                )}
+                              </Stack>
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                label={r.crawlerSource?.name ?? '—'}
+                                size="small"
+                                variant="outlined"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                label={r.status}
+                                size="small"
+                                color={statusColor(r.status)}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="caption">
+                                {new Date(r.discoveredAt).toLocaleString('fr-FR', {
+                                  day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                                })}
                               </Typography>
-                              <Tooltip title={r.sourceUrl}>
-                                <Typography variant="caption" color="text.secondary" noWrap>
-                                  {r.sourceUrl}
-                                </Typography>
-                              </Tooltip>
-                              {r.importErrorMessage && (
-                                <Typography variant="caption" color="error" noWrap>
-                                  {r.importErrorMessage}
-                                </Typography>
-                              )}
-                            </Stack>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              label={r.crawlerSource?.name ?? '—'}
-                              size="small"
-                              variant="outlined"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              label={r.status}
-                              size="small"
-                              color={statusColor(r.status)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="caption">
-                              {new Date(r.discoveredAt).toLocaleString('fr-FR', {
-                                day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-                              })}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Tooltip title="Ouvrir l'URL">
-                              <IconButton size="small" component="a" href={r.sourceUrl} target="_blank" rel="noreferrer">
-                                <OpenInNewIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            {r.status === 'pending_review' && (
-                              <>
-                                <Tooltip title="Approuver et telecharger">
-                                  <IconButton size="small" color="success" onClick={() => void handleApprove(r.id)}>
-                                    <CheckIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Rejeter">
-                                  <IconButton size="small" color="warning" onClick={() => void handleReject(r.id)}>
-                                    <BlockIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                              </>
-                            )}
-                            {(r.status === 'rejected' || r.status === 'import_failed') && (
-                              <Tooltip title="Rouvrir">
-                                <IconButton size="small" color="primary" onClick={() => void handleReopen(r.id)}>
-                                  <ReplayIcon fontSize="small" />
+                            </TableCell>
+                            <TableCell align="right">
+                              <Tooltip title="Ouvrir l'URL">
+                                <IconButton size="small" component="a" href={r.sourceUrl} target="_blank" rel="noreferrer">
+                                  <OpenInNewIcon fontSize="small" />
                                 </IconButton>
                               </Tooltip>
-                            )}
-                            <Tooltip title="Supprimer">
-                              <IconButton size="small" color="error" onClick={() => void handleDeleteResult(r.id)}>
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                              {r.status === 'pending_review' && (
+                                <>
+                                  <Tooltip title="Approuver et telecharger">
+                                    <IconButton size="small" color="success" onClick={() => void handleApprove(r.id)}>
+                                      <CheckIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Rejeter">
+                                    <IconButton size="small" color="warning" onClick={() => void handleReject(r.id)}>
+                                      <BlockIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                </>
+                              )}
+                              {(r.status === 'rejected' || r.status === 'import_failed') && (
+                                <Tooltip title="Rouvrir">
+                                  <IconButton size="small" color="primary" onClick={() => void handleReopen(r.id)}>
+                                    <ReplayIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              )}
+                              <Tooltip title="Supprimer">
+                                <IconButton size="small" color="error" onClick={() => void handleDeleteResult(r.id)}>
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                   <TablePagination

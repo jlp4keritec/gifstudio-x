@@ -14,6 +14,7 @@ import {
   streamVideoFile,
   guessVideoMime,
 } from '../services/video-share-service';
+import { runWithConcurrency } from '../lib/concurrency';
 
 const importUrlSchema = z.object({
   url: z.string().url('URL invalide'),
@@ -32,6 +33,10 @@ const listQuerySchema = z.object({
   minHeight: z.coerce.number().int().min(0).optional(),
   search: z.string().optional(),
   sort: z.enum(['date_desc', 'date_asc', 'duration_asc', 'duration_desc', 'size_desc']).default('date_desc'),
+});
+
+const bulkDeleteSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(500),
 });
 
 interface CrawlerOriginInfo {
@@ -225,21 +230,62 @@ export async function uploadFile(req: Request, res: Response, next: NextFunction
   }
 }
 
+async function deleteOneVideoOnDisk(id: string): Promise<void> {
+  const item = await prisma.videoAsset.findUnique({ where: { id } });
+  if (!item) throw new Error(`Video ${id} introuvable`);
+
+  if (item.localPath && fs.existsSync(item.localPath)) {
+    try { fs.unlinkSync(item.localPath); } catch (e) { console.warn('[videos] unlink failed:', e); }
+  }
+  if (item.thumbnailPath && fs.existsSync(item.thumbnailPath)) {
+    try { fs.unlinkSync(item.thumbnailPath); } catch (e) { console.warn('[videos] thumb unlink failed:', e); }
+  }
+
+  await prisma.videoAsset.delete({ where: { id } });
+}
+
 export async function deleteVideo(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = String(req.params.id);
-    const item = await prisma.videoAsset.findUnique({ where: { id } });
-    if (!item) throw new AppError(404, 'Video introuvable', 'NOT_FOUND');
-
-    if (item.localPath && fs.existsSync(item.localPath)) {
-      try { fs.unlinkSync(item.localPath); } catch (e) { console.warn('[videos] unlink failed:', e); }
-    }
-    if (item.thumbnailPath && fs.existsSync(item.thumbnailPath)) {
-      try { fs.unlinkSync(item.thumbnailPath); } catch (e) { console.warn('[videos] thumb unlink failed:', e); }
-    }
-
-    await prisma.videoAsset.delete({ where: { id } });
+    await deleteOneVideoOnDisk(id);
     res.json({ success: true, data: { deleted: true } });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('introuvable')) {
+      return next(new AppError(404, err.message, 'NOT_FOUND'));
+    }
+    next(err);
+  }
+}
+
+/**
+ * POST /videos/bulk-delete
+ * body : { ids: string[] }
+ * Suppression en parallele (max 20 simultanes).
+ */
+export async function bulkDeleteVideos(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { ids } = bulkDeleteSchema.parse(req.body);
+
+    const tasks = ids.map((id) => () => deleteOneVideoOnDisk(id));
+    const results = await runWithConcurrency(tasks, 20);
+
+    const succeeded: string[] = [];
+    const failed: Array<{ id: string; error: string }> = [];
+    results.forEach((r, i) => {
+      if (r.ok) succeeded.push(ids[i]);
+      else failed.push({ id: ids[i], error: r.error.message });
+    });
+
+    res.json({
+      success: true,
+      data: {
+        requested: ids.length,
+        succeeded: succeeded.length,
+        failed: failed.length,
+        succeededIds: succeeded,
+        failures: failed,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -313,13 +359,9 @@ export async function regenerateAllThumbnails(_req: Request, res: Response, next
 }
 
 // ============================================================================
-// SHARE SLUG : creation, revocation, stream public par slug
+// SHARE SLUG : creation, revocation, stream public par slug (10.4)
 // ============================================================================
 
-/**
- * POST /videos/:id/share
- * Genere ou retourne le slug existant. Auth requise.
- */
 export async function createShareSlug(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = String(req.params.id);
@@ -343,9 +385,6 @@ export async function createShareSlug(req: Request, res: Response, next: NextFun
   }
 }
 
-/**
- * DELETE /videos/:id/share : revoque le slug. Auth requise.
- */
 export async function revokeShareSlugCtrl(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = String(req.params.id);
@@ -359,11 +398,6 @@ export async function revokeShareSlugCtrl(req: Request, res: Response, next: Nex
   }
 }
 
-/**
- * GET /videos/file/:slug : stream le fichier video au client.
- * PAS d'auth (acces public via lien).
- * Supporte le header Range pour le scrubbing/seek.
- */
 export async function getVideoFileBySlug(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const slug = String(req.params.slug);

@@ -1,23 +1,30 @@
 import type { Request, Response, NextFunction } from 'express';
-import type { Prisma } from '@prisma/client';
+import fs from 'node:fs';
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 
 import { prisma } from '../lib/prisma';
 import { AppError } from '../middlewares/error-handler';
 import { importVideoFromUrl } from '../services/video-import-service';
-import { fetchRemoteImage } from '../services/image-proxy-service';
+import { proxyImage } from '../services/image-proxy-service';
+import { runWithConcurrency } from '../lib/concurrency';
 
 const listQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(25),
+  offset: z.coerce.number().int().min(0).default(0),
   status: z
     .enum(['pending_review', 'approved', 'rejected', 'imported', 'import_failed'])
     .optional(),
   sourceId: z.string().uuid().optional(),
-  offset: z.coerce.number().int().min(0).default(0),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
   search: z.string().optional(),
 });
 
-function serializeResult(r: {
+const bulkActionSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(500),
+  action: z.enum(['delete', 'reject', 'approve']),
+});
+
+interface ResultRow {
   id: string;
   crawlerSourceId: string;
   sourceUrl: string;
@@ -33,11 +40,10 @@ function serializeResult(r: {
   reviewedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  crawlerSource?: {
-    name: string;
-    adapter: string;
-  } | null;
-}) {
+  crawlerSource?: { id: string; name: string; adapter: string } | null;
+}
+
+function serializeResult(r: ResultRow) {
   return {
     id: r.id,
     crawlerSourceId: r.crawlerSourceId,
@@ -54,9 +60,7 @@ function serializeResult(r: {
     reviewedAt: r.reviewedAt?.toISOString() ?? null,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
-    crawlerSource: r.crawlerSource
-      ? { name: r.crawlerSource.name, adapter: r.crawlerSource.adapter }
-      : null,
+    crawlerSource: r.crawlerSource ?? null,
   };
 }
 
@@ -82,7 +86,7 @@ export async function listResults(req: Request, res: Response, next: NextFunctio
         skip: q.offset,
         take: q.limit,
         include: {
-          crawlerSource: { select: { name: true, adapter: true } },
+          crawlerSource: { select: { id: true, name: true, adapter: true } },
         },
       }),
     ]);
@@ -90,7 +94,7 @@ export async function listResults(req: Request, res: Response, next: NextFunctio
     res.json({
       success: true,
       data: {
-        items: items.map(serializeResult),
+        items: items.map((i) => serializeResult(i as ResultRow)),
         total,
         offset: q.offset,
         limit: q.limit,
@@ -101,87 +105,100 @@ export async function listResults(req: Request, res: Response, next: NextFunctio
   }
 }
 
-export async function rejectResult(req: Request, res: Response, next: NextFunction) {
+export async function getResultThumbnail(req: Request, res: Response, next: NextFunction) {
   try {
     const id = String(req.params.id);
-    const existing = await prisma.crawlerResult.findUnique({ where: { id } });
-    if (!existing) throw new AppError(404, 'Resultat introuvable', 'NOT_FOUND');
-
-    const updated = await prisma.crawlerResult.update({
+    const r = await prisma.crawlerResult.findUnique({
       where: { id },
-      data: {
-        status: 'rejected',
-        rejectedAt: new Date(),
-        reviewedAt: new Date(),
-      },
-      include: { crawlerSource: { select: { name: true, adapter: true } } },
+      select: { thumbnailUrl: true },
     });
-
-    res.json({ success: true, data: { result: serializeResult(updated) } });
+    if (!r?.thumbnailUrl) {
+      throw new AppError(404, 'Pas de thumbnail', 'NO_THUMBNAIL');
+    }
+    await proxyImage(r.thumbnailUrl, res);
   } catch (err) {
     next(err);
+  }
+}
+
+async function approveOne(id: string, userId: string): Promise<void> {
+  const r = await prisma.crawlerResult.findUnique({ where: { id } });
+  if (!r) throw new Error(`Resultat ${id} introuvable`);
+  if (r.status !== 'pending_review') {
+    throw new Error(`Statut "${r.status}" non eligible (doit etre pending_review)`);
+  }
+
+  try {
+    const asset = await importVideoFromUrl({
+      url: r.sourceUrl,
+      userId,
+    });
+
+    await prisma.crawlerResult.update({
+      where: { id },
+      data: {
+        status: 'imported',
+        reviewedAt: new Date(),
+        importedVideoAssetId: asset.id,
+        importErrorMessage: null,
+      },
+    });
+  } catch (err) {
+    await prisma.crawlerResult.update({
+      where: { id },
+      data: {
+        status: 'import_failed',
+        importErrorMessage: err instanceof Error ? err.message : 'Erreur import',
+      },
+    });
+    throw err;
   }
 }
 
 export async function approveAndImport(req: Request, res: Response, next: NextFunction) {
   try {
     if (!req.user) throw new AppError(401, 'Non authentifie', 'UNAUTHORIZED');
-
     const id = String(req.params.id);
-    const existing = await prisma.crawlerResult.findUnique({ where: { id } });
-    if (!existing) throw new AppError(404, 'Resultat introuvable', 'NOT_FOUND');
-    if (existing.status === 'imported') {
-      throw new AppError(400, 'Deja importe', 'ALREADY_IMPORTED');
-    }
-
-    await prisma.crawlerResult.update({
+    await approveOne(id, req.user.userId);
+    const updated = await prisma.crawlerResult.findUniqueOrThrow({
       where: { id },
-      data: { status: 'approved', reviewedAt: new Date() },
+      include: { crawlerSource: { select: { id: true, name: true, adapter: true } } },
     });
-
-    try {
-      const asset = await importVideoFromUrl({
-        url: existing.sourceUrl,
-        userId: req.user.userId,
-      });
-
-      const updated = await prisma.crawlerResult.update({
-        where: { id },
-        data: {
-          status: 'imported',
-          importedVideoAssetId: asset.id,
-          importErrorMessage: null,
-        },
-        include: { crawlerSource: { select: { name: true, adapter: true } } },
-      });
-
-      await prisma.videoAsset.update({
-        where: { id: asset.id },
-        data: { source: 'crawler' },
-      });
-
-      res.json({
-        success: true,
-        data: { result: serializeResult(updated), videoAssetId: asset.id },
-      });
-    } catch (importErr) {
-      const msg =
-        importErr instanceof Error ? importErr.message : 'Import echoue';
-      const updated = await prisma.crawlerResult.update({
-        where: { id },
-        data: {
-          status: 'import_failed',
-          importErrorMessage: msg,
-        },
-        include: { crawlerSource: { select: { name: true, adapter: true } } },
-      });
-      res.status(500).json({
-        success: false,
-        error: `Import echoue : ${msg}`,
-        data: { result: serializeResult(updated) },
-      });
-    }
+    res.json({ success: true, data: { result: serializeResult(updated as ResultRow) } });
   } catch (err) {
+    if (err instanceof Error && err.message.includes('introuvable')) {
+      return next(new AppError(404, err.message, 'NOT_FOUND'));
+    }
+    next(err);
+  }
+}
+
+async function rejectOne(id: string): Promise<void> {
+  const r = await prisma.crawlerResult.findUnique({ where: { id } });
+  if (!r) throw new Error(`Resultat ${id} introuvable`);
+  await prisma.crawlerResult.update({
+    where: { id },
+    data: {
+      status: 'rejected',
+      rejectedAt: new Date(),
+      reviewedAt: new Date(),
+    },
+  });
+}
+
+export async function rejectResult(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = String(req.params.id);
+    await rejectOne(id);
+    const updated = await prisma.crawlerResult.findUniqueOrThrow({
+      where: { id },
+      include: { crawlerSource: { select: { id: true, name: true, adapter: true } } },
+    });
+    res.json({ success: true, data: { result: serializeResult(updated as ResultRow) } });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('introuvable')) {
+      return next(new AppError(404, err.message, 'NOT_FOUND'));
+    }
     next(err);
   }
 }
@@ -189,74 +206,83 @@ export async function approveAndImport(req: Request, res: Response, next: NextFu
 export async function reopenResult(req: Request, res: Response, next: NextFunction) {
   try {
     const id = String(req.params.id);
-    const existing = await prisma.crawlerResult.findUnique({ where: { id } });
-    if (!existing) throw new AppError(404, 'Resultat introuvable', 'NOT_FOUND');
-
+    const r = await prisma.crawlerResult.findUnique({ where: { id } });
+    if (!r) throw new AppError(404, 'Resultat introuvable', 'NOT_FOUND');
     const updated = await prisma.crawlerResult.update({
       where: { id },
       data: {
         status: 'pending_review',
         rejectedAt: null,
         reviewedAt: null,
+        importErrorMessage: null,
       },
-      include: { crawlerSource: { select: { name: true, adapter: true } } },
+      include: { crawlerSource: { select: { id: true, name: true, adapter: true } } },
     });
-    res.json({ success: true, data: { result: serializeResult(updated) } });
+    res.json({ success: true, data: { result: serializeResult(updated as ResultRow) } });
   } catch (err) {
     next(err);
   }
+}
+
+async function deleteOneResult(id: string): Promise<void> {
+  const r = await prisma.crawlerResult.findUnique({ where: { id } });
+  if (!r) throw new Error(`Resultat ${id} introuvable`);
+  await prisma.crawlerResult.delete({ where: { id } });
 }
 
 export async function deleteResult(req: Request, res: Response, next: NextFunction) {
   try {
     const id = String(req.params.id);
-    const existing = await prisma.crawlerResult.findUnique({ where: { id } });
-    if (!existing) throw new AppError(404, 'Resultat introuvable', 'NOT_FOUND');
-    await prisma.crawlerResult.delete({ where: { id } });
+    await deleteOneResult(id);
     res.json({ success: true, data: { deleted: true } });
   } catch (err) {
+    if (err instanceof Error && err.message.includes('introuvable')) {
+      return next(new AppError(404, err.message, 'NOT_FOUND'));
+    }
     next(err);
   }
 }
 
 /**
- * GET /admin/crawler/results/:id/thumbnail
- * Proxifie la thumbnail distante (Rule34, Reddit, etc.) qui bloque le hotlink.
- * Cache 1h navigateur.
+ * POST /admin/crawler/results/bulk
+ * body : { ids: string[], action: 'delete' | 'reject' | 'approve' }
+ * Action en parallele, max 20 simultanes.
  */
-export async function getResultThumbnail(req: Request, res: Response, next: NextFunction) {
+export async function bulkAction(req: Request, res: Response, next: NextFunction) {
   try {
-    const id = String(req.params.id);
-    const result = await prisma.crawlerResult.findUnique({
-      where: { id },
-      select: { thumbnailUrl: true },
-    });
-    if (!result?.thumbnailUrl) {
-      throw new AppError(404, 'Aucune thumbnail', 'NOT_FOUND');
-    }
+    if (!req.user) throw new AppError(401, 'Non authentifie', 'UNAUTHORIZED');
+    const { ids, action } = bulkActionSchema.parse(req.body);
 
-    const fetched = await fetchRemoteImage(result.thumbnailUrl);
-
-    res.setHeader('Content-Type', fetched.contentType);
-    if (fetched.contentLength !== null) {
-      res.setHeader('Content-Length', String(fetched.contentLength));
-    }
-    res.setHeader('Cache-Control', 'private, max-age=3600');
-    fetched.stream.pipe(res);
-    fetched.stream.on('error', (err) => {
-      console.warn(`[thumbnail-proxy] stream error for ${id}:`, err.message);
-      if (!res.headersSent) {
-        res.status(502).json({ success: false, error: 'Stream error' });
-      } else {
-        res.destroy();
+    const userId = req.user.userId;
+    const tasks = ids.map((id) => {
+      switch (action) {
+        case 'delete': return () => deleteOneResult(id);
+        case 'reject': return () => rejectOne(id);
+        case 'approve': return () => approveOne(id, userId);
       }
     });
+
+    const results = await runWithConcurrency(tasks, 20);
+
+    const succeeded: string[] = [];
+    const failed: Array<{ id: string; error: string }> = [];
+    results.forEach((r, i) => {
+      if (r.ok) succeeded.push(ids[i]);
+      else failed.push({ id: ids[i], error: r.error.message });
+    });
+
+    res.json({
+      success: true,
+      data: {
+        action,
+        requested: ids.length,
+        succeeded: succeeded.length,
+        failed: failed.length,
+        succeededIds: succeeded,
+        failures: failed,
+      },
+    });
   } catch (err) {
-    if (err instanceof AppError) return next(err);
-    const msg = err instanceof Error ? err.message : 'Proxy error';
-    console.warn(`[thumbnail-proxy] failed:`, msg);
-    if (!res.headersSent) {
-      res.status(502).json({ success: false, error: `Thumbnail proxy : ${msg}` });
-    }
+    next(err);
   }
 }

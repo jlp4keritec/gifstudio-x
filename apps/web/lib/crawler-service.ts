@@ -42,6 +42,15 @@ export interface GenericHtmlTestResult {
   warnings: string[];
 }
 
+export interface BulkResultActionResponse {
+  action: 'delete' | 'reject' | 'approve';
+  requested: number;
+  succeeded: number;
+  failed: number;
+  succeededIds: string[];
+  failures: Array<{ id: string; error: string }>;
+}
+
 export const crawlerService = {
   async listAdapters(): Promise<CrawlerAdapterInfo[]> {
     const data = await apiFetch<{ adapters: CrawlerAdapterInfo[] }>(
@@ -139,6 +148,20 @@ export const crawlerService = {
   async deleteResult(id: string): Promise<void> {
     await apiFetch<{ deleted: boolean }>(`/admin/crawler/results/${id}`, {
       method: 'DELETE',
+    });
+  },
+
+  /**
+   * Action en lot sur des resultats du crawler.
+   * action : 'delete' | 'reject' | 'approve'
+   */
+  async bulkAction(
+    ids: string[],
+    action: 'delete' | 'reject' | 'approve',
+  ): Promise<BulkResultActionResponse> {
+    return apiFetch<BulkResultActionResponse>('/admin/crawler/results/bulk', {
+      method: 'POST',
+      json: { ids, action },
     });
   },
 

@@ -20,6 +20,9 @@ router.post('/sources/:id/run', sourcesCtl.triggerSourceRun);
 router.post('/test-generic-html', sourcesCtl.testGenericHtml);
 
 router.get('/results', resultsCtl.listResults);
+// Action en lot AVANT /:id (sinon Express matche bulk comme un id)
+router.post('/results/bulk', resultsCtl.bulkAction);
+
 router.get('/results/:id/thumbnail', resultsCtl.getResultThumbnail);
 router.post('/results/:id/approve', resultsCtl.approveAndImport);
 router.post('/results/:id/reject', resultsCtl.rejectResult);

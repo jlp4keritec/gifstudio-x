@@ -6,7 +6,6 @@ import { videoAssetUpload } from '../middlewares/video-asset-upload';
 const router = Router();
 
 // Endpoint PUBLIC (sans auth) : streaming du fichier video par slug.
-// Doit etre AVANT le requireAuth des autres routes.
 router.get('/file/:slug', videosController.getVideoFileBySlug);
 
 // Toutes les autres routes : auth requise
@@ -23,6 +22,9 @@ router.post(
   requireAuth,
   videosController.regenerateAllThumbnails,
 );
+// Bulk delete : route specifique (POST avec body) avant /:id
+router.post('/bulk-delete', requireAuth, videosController.bulkDeleteVideos);
+
 router.get('/:id', requireAuth, videosController.getVideo);
 router.get('/:id/thumbnail', requireAuth, videosController.getThumbnail);
 router.post(

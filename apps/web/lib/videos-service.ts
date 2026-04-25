@@ -16,6 +16,14 @@ function buildQueryString(filters: VideoAssetFilters = {}): string {
   return s ? `?${s}` : '';
 }
 
+export interface BulkDeleteResult {
+  requested: number;
+  succeeded: number;
+  failed: number;
+  succeededIds: string[];
+  failures: Array<{ id: string; error: string }>;
+}
+
 export const videosService = {
   async listAdvanced(filters?: VideoAssetFilters): Promise<VideoAssetListResponse> {
     return apiFetch<VideoAssetListResponse>(`/videos${buildQueryString(filters)}`);
@@ -99,14 +107,20 @@ export const videosService = {
     await apiFetch<{ deleted: boolean }>(`/videos/${id}`, { method: 'DELETE' });
   },
 
+  /**
+   * Suppression en lot. Renvoie le detail des succes/echecs.
+   */
+  async bulkDelete(ids: string[]): Promise<BulkDeleteResult> {
+    return apiFetch<BulkDeleteResult>('/videos/bulk-delete', {
+      method: 'POST',
+      json: { ids },
+    });
+  },
+
   thumbnailUrl(id: string): string {
     return `${API_BASE_URL}/videos/${id}/thumbnail`;
   },
 
-  /**
-   * Genere ou recupere le slug de partage pour cette video.
-   * Renvoie le slug + l'asset mis a jour.
-   */
   async createShareSlug(id: string): Promise<{ shareSlug: string; video: VideoAsset }> {
     return apiFetch<{ shareSlug: string; video: VideoAsset }>(
       `/videos/${id}/share`,
@@ -118,10 +132,6 @@ export const videosService = {
     await apiFetch<{ revoked: boolean }>(`/videos/${id}/share`, { method: 'DELETE' });
   },
 
-  /**
-   * URL publique du fichier video (utilisable dans <video> ou en fetch sans auth).
-   * Necessite un slug genere via createShareSlug.
-   */
   fileUrlBySlug(slug: string): string {
     return `${API_BASE_URL}/videos/file/${slug}`;
   },
