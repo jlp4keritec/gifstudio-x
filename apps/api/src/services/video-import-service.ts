@@ -10,6 +10,7 @@ import { env } from '../config/env';
 import { AppError } from '../middlewares/error-handler';
 import { generateAndSaveThumbnail } from './video-thumbnail-service';
 import { resolveVideoUrl, needsResolution } from './url-resolver';
+import { assertPublicUrl } from '../lib/url-security';
 
 const MAX_SIZE_BYTES = env.MAX_UPLOAD_SIZE_MB * 1024 * 1024;
 const MAX_DURATION_SEC = env.MAX_VIDEO_DURATION_SECONDS;
@@ -53,15 +54,13 @@ export async function validateVideoUrl(url: string): Promise<{
   contentType: string | null;
   contentLength: number | null;
 }> {
+  // [Patch HX-01] Validation SSRF : refuse les hosts prives, loopback, cloud metadata
   let parsed: URL;
   try {
-    parsed = new URL(url);
-  } catch {
-    throw new AppError(400, 'URL invalide', 'INVALID_URL');
-  }
-
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw new AppError(400, 'Seuls http et https sont autorises', 'INVALID_PROTOCOL');
+    parsed = assertPublicUrl(url);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'URL invalide';
+    throw new AppError(400, msg, 'INVALID_URL');
   }
 
   let contentType: string | null = null;
