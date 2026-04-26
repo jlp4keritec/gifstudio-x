@@ -6,6 +6,7 @@ import { AppError } from '../middlewares/error-handler';
 import {
   getAdapter,
   getGenericHtmlAdapter,
+  getGenericBrowserAdapter,
   listImplementedAdapters,
 } from '../services/crawler/registry';
 import { validateCronMinInterval } from '../lib/cron-validator';
@@ -17,6 +18,7 @@ const adapterEnum = z.enum([
   'rule34',
   'e621',
   'generic_html',
+  'generic_browser',
 ]);
 
 const baseSourceSchema = z.object({
@@ -30,7 +32,7 @@ const baseSourceSchema = z.object({
 
 const updateSourceSchema = baseSourceSchema.partial();
 
-const testGenericHtmlSchema = z.object({
+const testConfigSchema = z.object({
   config: z.record(z.unknown()),
 });
 
@@ -205,7 +207,7 @@ export async function triggerSourceRun(req: Request, res: Response, next: NextFu
 export async function listAdapters(_req: Request, res: Response, next: NextFunction) {
   try {
     const implemented = listImplementedAdapters();
-    const all = ['reddit', 'redgifs', 'rule34', 'e621', 'generic_html'] as const;
+    const all = ['reddit', 'redgifs', 'rule34', 'e621', 'generic_html', 'generic_browser'] as const;
     res.json({
       success: true,
       data: {
@@ -221,14 +223,30 @@ export async function listAdapters(_req: Request, res: Response, next: NextFunct
 }
 
 /**
- * POST /admin/crawler/test-generic-html
- * Execute le GenericHtmlAdapter.testRun() sans inserer en BDD.
- * Permet de valider la config (selecteurs / regex) avant de creer la source.
+ * POST /admin/crawler/test-generic-html : test GenericHTML.
  */
 export async function testGenericHtml(req: Request, res: Response, next: NextFunction) {
   try {
-    const { config } = testGenericHtmlSchema.parse(req.body);
+    const { config } = testConfigSchema.parse(req.body);
     const adapter = getGenericHtmlAdapter();
+    const result = await adapter.testRun(config);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    if (err instanceof Error) {
+      return next(new AppError(400, err.message, 'TEST_FAILED'));
+    }
+    next(err);
+  }
+}
+
+/**
+ * POST /admin/crawler/test-generic-browser : test GenericBrowser (Playwright).
+ * Plus lent (peut prendre 30s+) car lance Chromium et charge la page.
+ */
+export async function testGenericBrowser(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { config } = testConfigSchema.parse(req.body);
+    const adapter = getGenericBrowserAdapter();
     const result = await adapter.testRun(config);
     res.json({ success: true, data: result });
   } catch (err) {

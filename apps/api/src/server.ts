@@ -10,6 +10,7 @@ import {
   startCrawlerScheduler,
   stopCrawlerScheduler,
 } from './workers/crawler-scheduler';
+import { shutdownPlaywright } from './services/crawler/adapters/generic-browser-adapter';
 
 async function main() {
   await initStorage();
@@ -42,6 +43,7 @@ async function main() {
     try {
       stopCrawlerScheduler();
       await stopCrawlerQueue();
+      await shutdownPlaywright();
     } catch (err) {
       console.error('shutdown error:', err);
     }

@@ -42,6 +42,11 @@ export interface GenericHtmlTestResult {
   warnings: string[];
 }
 
+export interface GenericBrowserTestResult extends GenericHtmlTestResult {
+  finalUrl: string;
+  networkCaptureCount: number;
+}
+
 export interface BulkResultActionResponse {
   action: 'delete' | 'reject' | 'approve';
   requested: number;
@@ -102,6 +107,13 @@ export const crawlerService = {
     });
   },
 
+  async testGenericBrowser(config: Record<string, unknown>): Promise<GenericBrowserTestResult> {
+    return apiFetch<GenericBrowserTestResult>('/admin/crawler/test-generic-browser', {
+      method: 'POST',
+      json: { config },
+    });
+  },
+
   async listResults(filters: ListResultsFilters = {}): Promise<{
     items: CrawlerResult[];
     total: number;
@@ -151,10 +163,6 @@ export const crawlerService = {
     });
   },
 
-  /**
-   * Action en lot sur des resultats du crawler.
-   * action : 'delete' | 'reject' | 'approve'
-   */
   async bulkAction(
     ids: string[],
     action: 'delete' | 'reject' | 'approve',

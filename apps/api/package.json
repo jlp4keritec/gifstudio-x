@@ -13,7 +13,8 @@
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
     "prisma:seed": "tsx prisma/seed.ts",
-    "prisma:reset": "prisma migrate reset"
+    "prisma:reset": "prisma migrate reset",
+    "playwright:install": "playwright install chromium"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -34,6 +35,7 @@
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
     "pg-boss": "^10.1.5",
+    "playwright": "^1.48.0",
     "sharp": "^0.33.5",
     "zod": "^3.23.8"
   },

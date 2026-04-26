@@ -33,6 +33,7 @@ import {
   crawlerService,
   type CreateSourceInput,
   type GenericHtmlTestResult,
+  type GenericBrowserTestResult,
 } from '@/lib/crawler-service';
 import { ApiError } from '@/lib/api-client';
 
@@ -99,6 +100,24 @@ const CONFIG_TEMPLATES: Record<CrawlerAdapter, string> = {
     null,
     2,
   ),
+  generic_browser: JSON.stringify(
+    {
+      url: 'https://example.com/videos',
+      waitForSelector: '.video-card',
+      waitForTimeout: 30000,
+      scrollToBottom: true,
+      scrollPasses: 3,
+      videoSelectors: ["video[src]", "video source[src]"],
+      videoRegex: "https?://[^\"'\\s<>]+\\.(?:mp4|webm|m3u8)",
+      thumbnailSelectors: ["img.thumb"],
+      titleSelectors: ["h1", "title"],
+      interceptNetwork: true,
+      allowedExtensions: ["mp4", "webm", "m3u8"],
+      viewport: { width: 1280, height: 720 },
+    },
+    null,
+    2,
+  ),
 };
 
 export function CrawlerSourceDialog({ open, source, adapters, onClose }: Props) {
@@ -113,9 +132,10 @@ export function CrawlerSourceDialog({ open, source, adapters, onClose }: Props) 
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Test GenericHTML
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<GenericHtmlTestResult | null>(null);
+  const [testResult, setTestResult] = useState<
+    GenericHtmlTestResult | GenericBrowserTestResult | null
+  >(null);
   const [testError, setTestError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -193,7 +213,12 @@ export function CrawlerSourceDialog({ open, source, adapters, onClose }: Props) 
       } catch {
         throw new Error('Config : JSON invalide');
       }
-      const result = await crawlerService.testGenericHtml(parsedConfig);
+      let result: GenericHtmlTestResult | GenericBrowserTestResult;
+      if (adapter === 'generic_browser') {
+        result = await crawlerService.testGenericBrowser(parsedConfig);
+      } else {
+        result = await crawlerService.testGenericHtml(parsedConfig);
+      }
       setTestResult(result);
     } catch (err) {
       if (err instanceof ApiError) setTestError(err.message);
@@ -203,7 +228,9 @@ export function CrawlerSourceDialog({ open, source, adapters, onClose }: Props) 
     }
   };
 
-  const isGenericHtml = adapter === 'generic_html';
+  const isTestable = adapter === 'generic_html' || adapter === 'generic_browser';
+  const isBrowserResult = (r: unknown): r is GenericBrowserTestResult =>
+    Boolean(r && typeof r === 'object' && 'networkCaptureCount' in r);
 
   return (
     <Dialog open={open} onClose={() => onClose(false)} fullWidth maxWidth="md">
@@ -234,10 +261,21 @@ export function CrawlerSourceDialog({ open, source, adapters, onClose }: Props) 
               {adapters.map((a) => (
                 <MenuItem key={a.name} value={a.name} disabled={!a.implemented}>
                   {a.name} {!a.implemented && '(bientot)'}
+                  {a.name === 'generic_browser' && ' — Playwright (sites JS, plus lent)'}
+                  {a.name === 'generic_html' && ' — fetch + selecteurs'}
                 </MenuItem>
               ))}
             </Select>
           </FormControl>
+
+          {adapter === 'generic_browser' && (
+            <Alert severity="info">
+              Mode <strong>Playwright</strong> : charge la page dans Chromium headless
+              (rendu JS), supporte le scroll auto et l'intercept reseau.
+              Plus lent (10-30s par run) mais beaucoup plus puissant.
+              Necessite : <code>pnpm playwright:install</code> a executer une fois.
+            </Alert>
+          )}
 
           <Box>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
@@ -248,12 +286,12 @@ export function CrawlerSourceDialog({ open, source, adapters, onClose }: Props) 
               onChange={(e) => setConfig(e.target.value)}
               multiline
               minRows={6}
-              maxRows={14}
+              maxRows={18}
               fullWidth
               sx={{ fontFamily: 'monospace' }}
               InputProps={{ sx: { fontFamily: 'monospace', fontSize: 13 } }}
             />
-            {isGenericHtml && (
+            {isTestable && (
               <Stack direction="row" spacing={1} sx={{ mt: 1 }} alignItems="center">
                 <Button
                   variant="outlined"
@@ -262,29 +300,36 @@ export function CrawlerSourceDialog({ open, source, adapters, onClose }: Props) 
                   onClick={handleTest}
                   disabled={testing}
                 >
-                  Tester la config
+                  {testing ? 'Test en cours...' : 'Tester la config'}
                 </Button>
                 <Typography variant="caption" color="text.secondary">
-                  Fetch la page + applique les selecteurs sans rien inserer
+                  {adapter === 'generic_browser'
+                    ? 'Lance Chromium et capture la page (peut prendre 30s+)'
+                    : 'Fetch la page + applique les selecteurs sans rien inserer'}
                 </Typography>
               </Stack>
             )}
           </Box>
 
-          {/* Resultats du test */}
-          {isGenericHtml && testError && (
-            <Alert severity="error">{testError}</Alert>
-          )}
-          {isGenericHtml && testResult && (
+          {testError && <Alert severity="error">{testError}</Alert>}
+
+          {testResult && (
             <Paper variant="outlined" sx={{ p: 2, bgcolor: 'action.hover' }}>
               <Stack spacing={1}>
                 <Typography variant="subtitle2">Resultat du test</Typography>
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   <Chip
                     size="small"
-                    label={`Page : ${testResult.pageTitle.slice(0, 50) || '(sans titre)'}`}
+                    label={`Page : ${(testResult.pageTitle || '(sans titre)').slice(0, 50)}`}
                     variant="outlined"
                   />
+                  {isBrowserResult(testResult) && (
+                    <Chip
+                      size="small"
+                      label={`URL finale : ${new URL(testResult.finalUrl).hostname}`}
+                      variant="outlined"
+                    />
+                  )}
                   <Chip
                     size="small"
                     label={`HTML : ${(testResult.htmlSize / 1024).toFixed(0)} Ko`}
@@ -300,6 +345,13 @@ export function CrawlerSourceDialog({ open, source, adapters, onClose }: Props) 
                     label={`Regex : ${testResult.regexMatchCount} match`}
                     color={testResult.regexMatchCount > 0 ? 'success' : 'default'}
                   />
+                  {isBrowserResult(testResult) && (
+                    <Chip
+                      size="small"
+                      label={`Network : ${testResult.networkCaptureCount} capturees`}
+                      color={testResult.networkCaptureCount > 0 ? 'success' : 'default'}
+                    />
+                  )}
                   <Chip
                     size="small"
                     label={`URLs videos : ${testResult.filteredUrls.length}`}
@@ -320,7 +372,7 @@ export function CrawlerSourceDialog({ open, source, adapters, onClose }: Props) 
                     </Typography>
                     <Box
                       sx={{
-                        maxHeight: 160,
+                        maxHeight: 200,
                         overflowY: 'auto',
                         fontFamily: 'monospace',
                         fontSize: 12,
@@ -328,7 +380,7 @@ export function CrawlerSourceDialog({ open, source, adapters, onClose }: Props) 
                       }}
                     >
                       {testResult.filteredUrls.slice(0, 10).map((u, i) => (
-                        <Box key={i} sx={{ py: 0.25 }}>{u}</Box>
+                        <Box key={i} sx={{ py: 0.25, wordBreak: 'break-all' }}>{u}</Box>
                       ))}
                     </Box>
                   </Box>

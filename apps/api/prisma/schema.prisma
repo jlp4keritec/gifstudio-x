@@ -1,5 +1,5 @@
 // GifStudio-X - Prisma schema
-// Etape 10.11 : ajout UserSettings (table generique json pour les preferences)
+// Etape 10.12 : ajout adaptateur generic_browser (Playwright)
 
 generator client {
   provider = "prisma-client-js"
@@ -36,6 +36,7 @@ enum CrawlerAdapter {
   rule34
   e621
   generic_html
+  generic_browser
 }
 
 enum CrawlerRunStatus {
@@ -77,10 +78,7 @@ model UserSettings {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String   @unique @map("user_id") @db.Uuid
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  /// JSONB libre. Cle "watermark" -> WatermarkConfig.
   data      Json     @default("{}")
-
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

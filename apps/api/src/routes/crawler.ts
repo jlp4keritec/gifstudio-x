@@ -16,11 +16,11 @@ router.patch('/sources/:id', sourcesCtl.updateSource);
 router.delete('/sources/:id', sourcesCtl.deleteSource);
 router.post('/sources/:id/run', sourcesCtl.triggerSourceRun);
 
-// Test a blanc d'une config GenericHTML (sans inserer en BDD)
+// Tests a blanc (sans inserer en BDD)
 router.post('/test-generic-html', sourcesCtl.testGenericHtml);
+router.post('/test-generic-browser', sourcesCtl.testGenericBrowser);
 
 router.get('/results', resultsCtl.listResults);
-// Action en lot AVANT /:id (sinon Express matche bulk comme un id)
 router.post('/results/bulk', resultsCtl.bulkAction);
 
 router.get('/results/:id/thumbnail', resultsCtl.getResultThumbnail);
