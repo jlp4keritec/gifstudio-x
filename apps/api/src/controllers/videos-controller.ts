@@ -272,8 +272,11 @@ export async function bulkDeleteVideos(req: Request, res: Response, next: NextFu
     const succeeded: string[] = [];
     const failed: Array<{ id: string; error: string }> = [];
     results.forEach((r, i) => {
-      if (r.ok) succeeded.push(ids[i]);
-      else failed.push({ id: ids[i], error: r.error.message });
+      if ('error' in r) {
+        failed.push({ id: ids[i], error: r.error.message });
+      } else {
+        succeeded.push(ids[i]);
+      }
     });
 
     res.json({

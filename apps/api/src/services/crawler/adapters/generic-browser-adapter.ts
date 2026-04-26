@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 import type { Browser, BrowserContext, Page, Request as PwRequest } from 'playwright';
 import { assertPublicUrl } from '../../../lib/url-security';
 import type {
@@ -40,35 +41,9 @@ const FETCH_NAV_TIMEOUT_MS = 30_000;
 
 // ============================================================================
 // Securite : refus des hosts prives (anti-SSRF)
+// La fonction assertPublicUrl est importee depuis ../../../lib/url-security
+// (single source of truth pour la validation SSRF).
 // ============================================================================
-
-function assertPublicUrl(url: string): URL {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error('URL invalide');
-  }
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw new Error('Protocole non autorise (http/https uniquement)');
-  }
-  const host = parsed.hostname.toLowerCase();
-  if (
-    host === 'localhost' ||
-    host.startsWith('127.') ||
-    host.startsWith('10.') ||
-    host.startsWith('192.168.') ||
-    host.startsWith('169.254.') ||
-    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
-    host.startsWith('::1') ||
-    host.startsWith('fe80:') ||
-    host.startsWith('fc00:') ||
-    host.startsWith('fd00:')
-  ) {
-    throw new Error(`Host prive non autorise : ${host}`);
-  }
-  return parsed;
-}
 
 // ============================================================================
 // Singleton Playwright (browser partage entre runs pour gagner du temps)
