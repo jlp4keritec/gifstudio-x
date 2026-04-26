@@ -18,6 +18,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import LogoutIcon from '@mui/icons-material/Logout';
 import LockResetIcon from '@mui/icons-material/LockReset';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { useAuth } from '@/lib/auth-context';
 
 const ROLE_LABELS: Record<string, string> = {
@@ -88,6 +89,13 @@ export function UserMenu() {
             <PersonIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText>Mon profil</ListItemText>
+        </MenuItem>
+
+        <MenuItem onClick={() => navigateTo('/settings')}>
+          <ListItemIcon>
+            <SettingsIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Paramètres</ListItemText>
         </MenuItem>
 
         <MenuItem onClick={() => navigateTo('/change-password')}>

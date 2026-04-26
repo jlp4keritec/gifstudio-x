@@ -7,6 +7,7 @@ import { collectionsRouter } from './collections';
 import { publicRouter } from './public';
 import { videosRouter } from './videos';
 import { crawlerRouter } from './crawler';
+import { settingsRouter } from './settings';
 
 const router = Router();
 
@@ -29,5 +30,6 @@ router.use('/upload', uploadRouter);
 router.use('/gifs', gifsRouter);
 router.use('/collections', collectionsRouter);
 router.use('/videos', videosRouter);
+router.use('/settings', settingsRouter);
 
 export { router as apiRouter };

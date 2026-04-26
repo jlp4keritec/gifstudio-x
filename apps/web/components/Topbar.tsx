@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AppBar, Toolbar, Typography, Box, Button, Stack, Tooltip } from '@mui/material';
+import { AppBar, Toolbar, Typography, Box, Button, Stack, Tooltip, IconButton } from '@mui/material';
 import MovieFilterIcon from '@mui/icons-material/MovieFilter';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import VideoLibraryIcon from '@mui/icons-material/VideoLibrary';
@@ -12,6 +12,7 @@ import CollectionsIcon from '@mui/icons-material/Collections';
 import ExploreIcon from '@mui/icons-material/Explore';
 import TravelExploreIcon from '@mui/icons-material/TravelExplore';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
 import { APP_NAME } from '@gifstudio-x/shared';
@@ -21,7 +22,6 @@ interface NavItem {
   href: string;
   label: string;
   icon: React.ReactNode;
-  /** True si actif quand pathname commence par href */
   prefix?: boolean;
   adminOnly?: boolean;
 }
@@ -57,6 +57,7 @@ export function Topbar() {
   const { user } = useAuth();
 
   const visibleItems = NAV_ITEMS.filter((i) => !i.adminOnly || user?.role === 'admin');
+  const settingsActive = pathname === '/settings' || pathname.startsWith('/settings/');
 
   return (
     <AppBar position="sticky" elevation={0}>
@@ -92,7 +93,6 @@ export function Topbar() {
             flexGrow: 1,
             ml: 2,
             overflowX: 'auto',
-            // Sur mobile : icones seulement
             '& .nav-label': {
               display: { xs: 'none', lg: 'inline' },
             },
@@ -101,7 +101,7 @@ export function Topbar() {
           {visibleItems.map((item) => {
             const active = isActive(pathname, item);
             return (
-              <Tooltip key={item.href} title={item.label} disableHoverListener={undefined}>
+              <Tooltip key={item.href} title={item.label}>
                 <Button
                   component={Link}
                   href={item.href}
@@ -133,7 +133,19 @@ export function Topbar() {
           })}
         </Stack>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+          <Tooltip title="Parametres">
+            <IconButton
+              component={Link}
+              href="/settings"
+              sx={{
+                color: 'inherit',
+                bgcolor: settingsActive ? 'rgba(255,255,255,0.16)' : 'transparent',
+              }}
+            >
+              <SettingsIcon />
+            </IconButton>
+          </Tooltip>
           <ThemeToggle />
           <UserMenu />
         </Box>

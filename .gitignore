@@ -45,3 +45,8 @@ prisma/migrations/dev.db-journal
 
 # Docker
 docker-data/
+
+# Windows
+desktop.ini
+*.lnk
+*\ - Copie*

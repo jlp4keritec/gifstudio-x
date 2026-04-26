@@ -1,5 +1,5 @@
 // GifStudio-X - Prisma schema
-// Etape 10.4 : ajout shareSlug sur VideoAsset pour acces public via lien
+// Etape 10.11 : ajout UserSettings (table generique json pour les preferences)
 
 generator client {
   provider = "prisma-client-js"
@@ -68,8 +68,23 @@ model User {
   collections    Collection[]
   videoAssets    VideoAsset[]
   crawlerSources CrawlerSource[]
+  settings       UserSettings?
 
   @@map("users")
+}
+
+model UserSettings {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @map("user_id") @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// JSONB libre. Cle "watermark" -> WatermarkConfig.
+  data      Json     @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("user_settings")
 }
 
 model Gif {
@@ -168,8 +183,6 @@ model VideoAsset {
   status           VideoAssetStatus  @default(pending)
   errorMessage     String?           @map("error_message") @db.Text
 
-  /// Slug aleatoire pour acces via lien partageable (sans auth).
-  /// Permanent jusqu'a revocation manuelle. Unique sur les non-null.
   shareSlug        String?           @unique @map("share_slug") @db.VarChar(32)
 
   importedById     String            @map("imported_by_id") @db.Uuid

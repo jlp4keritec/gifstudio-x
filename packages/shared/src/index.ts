@@ -8,4 +8,5 @@ export * from './types/dto';
 export * from './types/category';
 export * from './types/video-asset';
 export * from './types/crawler';
+export * from './types/user-settings';
 export * from './constants/index';
