@@ -8,7 +8,7 @@
     1. Decommissionne l'ancienne stack gifstudio (publique) avec son volume Postgres
     2. Verifie les prerequis (Docker, Nginx, Certbot)
     3. Cree /var/www/gifstudio-x + storage
-    4. Clone le repo gifstudio-x
+    4. Init le repo gifstudio-x (git init + fetch + reset, compatible dossier non vide)
     5. Genere .env.production avec secrets aleatoires
     6. Cree .htpasswd Nginx pour Basic Auth (admin@gifstudio-x.local)
     7. Configure Nginx (reverse proxy + Basic Auth)
@@ -226,26 +226,27 @@ Invoke-Ssh -Sudo -Command "chown -R $VpsUser`:$VpsUser $AppRoot"
 Write-OK "Dossiers crees"
 
 # ============================================================================
-# 4. Clone du repo (ou pull si existe deja)
+# 4. Init du repo (compatible dossier non vide a cause du storage cree etape 3)
 # ============================================================================
 
-Write-Step "4. Clone du repo gifstudio-x"
+Write-Step "4. Init du repo gifstudio-x"
 
 $repoExists = Invoke-Ssh -Command "test -d $AppRoot/.git && echo YES || echo NO"
 if ($repoExists -eq 'YES') {
     if ($Force) {
-        Write-Warn "-Force : suppression de l'ancien clone"
-        Invoke-Ssh -Sudo -Command "rm -rf $AppRoot/* $AppRoot/.git"
-        Invoke-Ssh -Command "git clone $RepoUrl $AppRoot"
-        Write-OK "Repo reclone"
+        Write-Warn "-Force : reset hard sur origin/main (preserve storage/ et .env.production)"
+        Invoke-Ssh -Command "cd $AppRoot && git fetch origin main && git reset --hard origin/main && git clean -fdx -e storage -e .env.production"
+        Write-OK "Repo reinitialise"
     } else {
-        Write-Info "Repo deja clone, pull"
-        Invoke-Ssh -Command "cd $AppRoot && git pull"
+        Write-Info "Repo deja initialise, fetch + reset"
+        Invoke-Ssh -Command "cd $AppRoot && git fetch origin main && git reset --hard origin/main"
         Write-OK "Repo a jour"
     }
 } else {
-    Invoke-Ssh -Command "git clone $RepoUrl $AppRoot"
-    Write-OK "Repo clone"
+    # Le dossier existe deja (cree etape 3 avec storage/) donc 'git clone .' refuserait.
+    # On passe par git init + remote + fetch + reset --hard qui acceptent un dossier non vide.
+    Invoke-Ssh -Command "cd $AppRoot && git init -b main && git remote add origin $RepoUrl && git fetch origin main && git reset --hard origin/main"
+    Write-OK "Repo initialise : $RepoUrl"
 }
 
 # ============================================================================
