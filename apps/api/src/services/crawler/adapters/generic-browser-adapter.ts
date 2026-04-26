@@ -87,10 +87,18 @@ async function getBrowser(): Promise<Browser> {
     const { chromium } = await import('playwright');
     const browser = await chromium.launch({
       headless: true,
+      // [Patch HX-05] --no-sandbox retire ; sandbox utilisateur active
       args: [
-        '--no-sandbox',
         '--disable-blink-features=AutomationControlled',
         '--disable-dev-shm-usage',
+        '--disable-extensions',
+        '--disable-plugins',
+        '--disable-software-rasterizer',
+        '--mute-audio',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-features=IsolateOrigins,site-per-process,TranslateUI',
+        '--disable-background-networking',
       ],
     });
     cachedBrowser = browser;

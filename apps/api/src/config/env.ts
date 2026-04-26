@@ -9,7 +9,13 @@ const envSchema = z.object({
   API_PORT: z.coerce.number().int().positive().default(4003),
   API_HOST: z.string().default('localhost'),
 
-  JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
+  JWT_SECRET: z
+    .string()
+    .min(32, 'JWT_SECRET must be at least 32 characters')
+    .refine(
+      (s) => !/(change-me|change_me|your-secret|default|dev-secret|test-secret)/i.test(s),
+      'JWT_SECRET contient une valeur par defaut/placeholder. Genere une vraie valeur aleatoire.',
+    ),
   JWT_EXPIRES_IN: z.string().default('24h'),
   BCRYPT_COST: z.coerce.number().int().min(10).max(15).default(12),
 

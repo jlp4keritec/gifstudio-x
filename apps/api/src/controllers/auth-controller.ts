@@ -66,16 +66,17 @@ function toPublicUser(user: {
 async function findUserByIdentifier(identifier: string) {
   const trimmed = identifier.trim().toLowerCase();
 
-  if (trimmed.includes('@')) {
-    return prisma.user.findUnique({ where: { email: trimmed } });
+  // [Patch H-05] Recherche par prefixe supprimee : on exige un email complet.
+  // Empeche l'enumeration de comptes via "admin" (qui matche admin@... avant).
+  if (!trimmed.includes('@')) {
+    return null;
   }
-
-  return prisma.user.findFirst({
-    where: {
-      email: { startsWith: `${trimmed}@`, mode: 'insensitive' },
-    },
-  });
+  return prisma.user.findUnique({ where: { email: trimmed } });
 }
+
+// [Patch H-05] Hash factice pour anti-timing attack : si user inexistant, on
+// fait quand meme un bcrypt.compare pour que la duree de reponse soit identique.
+const DUMMY_BCRYPT_HASH = '$2a$12$W/guBMekK0VQONyUZhtVbO6z6NRxi0Lw8kuri2aD144l93UvL.y.q';
 
 export async function login(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -83,12 +84,11 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
 
     const user = await findUserByIdentifier(identifier);
 
-    if (!user || !user.isActive) {
-      throw new AppError(401, 'Identifiant ou mot de passe incorrect', 'INVALID_CREDENTIALS');
-    }
+    // [Patch H-05] Anti-timing : on hash toujours, meme si user inexistant
+    const hashToCheck = user?.passwordHash ?? DUMMY_BCRYPT_HASH;
+    const valid = await verifyPassword(password, hashToCheck);
 
-    const valid = await verifyPassword(password, user.passwordHash);
-    if (!valid) {
+    if (!user || !user.isActive || !valid) {
       throw new AppError(401, 'Identifiant ou mot de passe incorrect', 'INVALID_CREDENTIALS');
     }
 

@@ -8,6 +8,7 @@ import { env } from './config/env';
 import { apiRouter } from './routes/index';
 import { errorHandler, notFoundHandler } from './middlewares/error-handler';
 import { optionalAuth } from './middlewares/optional-auth';
+import { originCheck } from './middlewares/origin-check';
 
 export function createApp(): express.Application {
   const app = express();
@@ -47,6 +48,7 @@ export function createApp(): express.Application {
 
   // Hydrate req.user si présent, mais ne bloque pas
   app.use('/api/v1', optionalAuth);
+  app.use('/api/v1', originCheck);
   app.use('/api/v1', apiRouter);
 
   app.use(notFoundHandler);

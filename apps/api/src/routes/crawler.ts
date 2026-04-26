@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middlewares/auth';
+import { strictRateLimiter } from '../middlewares/rate-limit';
 import * as sourcesCtl from '../controllers/crawler-sources-controller';
 import * as resultsCtl from '../controllers/crawler-results-controller';
 
@@ -14,11 +15,11 @@ router.post('/sources', sourcesCtl.createSource);
 router.get('/sources/:id', sourcesCtl.getSource);
 router.patch('/sources/:id', sourcesCtl.updateSource);
 router.delete('/sources/:id', sourcesCtl.deleteSource);
-router.post('/sources/:id/run', sourcesCtl.triggerSourceRun);
+router.post('/sources/:id/run', strictRateLimiter, sourcesCtl.triggerSourceRun);
 
 // Tests a blanc (sans inserer en BDD)
-router.post('/test-generic-html', sourcesCtl.testGenericHtml);
-router.post('/test-generic-browser', sourcesCtl.testGenericBrowser);
+router.post('/test-generic-html', strictRateLimiter, sourcesCtl.testGenericHtml);
+router.post('/test-generic-browser', strictRateLimiter, sourcesCtl.testGenericBrowser);
 
 router.get('/results', resultsCtl.listResults);
 router.post('/results/bulk', resultsCtl.bulkAction);
