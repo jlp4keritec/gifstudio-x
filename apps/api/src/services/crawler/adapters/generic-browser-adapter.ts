@@ -1,4 +1,5 @@
-import type { Browser, BrowserContext, Page, Request as PwRequest } from 'playwright';
+import type { Browser, BrowserContext, Page, Request as PwRequest } from 'playwright';
+import { assertPublicUrl } from '../../../lib/url-security';
 import type {
   CrawlerAdapter,
   CrawlerAdapterContext,
@@ -218,6 +219,18 @@ async function capturePage(
   }
 
   // Navigation
+  // [Patch HX-02/04] Bloquer toute requete vers un host prive (anti-SSRF Playwright)
+  await page.route('**/*', async (route) => {
+    const reqUrl = route.request().url();
+    try {
+      assertPublicUrl(reqUrl);
+      await route.continue();
+    } catch {
+      console.warn(`[generic_browser] requete bloquee vers host prive : ${reqUrl}`);
+      await route.abort('blockedbyclient');
+    }
+  });
+
   await page.goto(url, {
     waitUntil: 'domcontentloaded',
     timeout: FETCH_NAV_TIMEOUT_MS,

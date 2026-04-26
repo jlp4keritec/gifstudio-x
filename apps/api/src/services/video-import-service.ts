@@ -11,6 +11,7 @@ import { AppError } from '../middlewares/error-handler';
 import { generateAndSaveThumbnail } from './video-thumbnail-service';
 import { resolveVideoUrl, needsResolution } from './url-resolver';
 import { assertPublicUrl } from '../lib/url-security';
+import { safeAxiosHead } from '../lib/safe-fetch';
 
 const MAX_SIZE_BYTES = env.MAX_UPLOAD_SIZE_MB * 1024 * 1024;
 const MAX_DURATION_SEC = env.MAX_VIDEO_DURATION_SECONDS;
@@ -67,7 +68,7 @@ export async function validateVideoUrl(url: string): Promise<{
   let contentLength: number | null = null;
 
   try {
-    const head = await axios.head(url, {
+    const head = await safeAxiosHead(url, {
       timeout: 10_000,
       maxRedirects: 5,
       validateStatus: (s) => s >= 200 && s < 400,
