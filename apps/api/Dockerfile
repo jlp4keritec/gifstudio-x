@@ -102,10 +102,13 @@ COPY --from=builder --chown=nodejs:nodejs /app/apps/api/dist ./apps/api/dist
 COPY --from=builder --chown=nodejs:nodejs /app/apps/api/prisma ./apps/api/prisma
 COPY --from=builder --chown=nodejs:nodejs /app/apps/api/package.json ./apps/api/
 
-# Installer Chromium Playwright (en tant que user nodejs)
+# Installer le binaire Chromium pour Playwright
+# Les deps systeme (libnss3, libcups2, etc.) sont deja installees au stage 2 via apt,
+# donc pas besoin de --with-deps qui necessiterait root (et on est USER nodejs ici).
 USER nodejs
-RUN cd apps/api && npx playwright install chromium --with-deps 2>/dev/null || \
-    cd apps/api && npx playwright install chromium
+WORKDIR /app/apps/api
+RUN npx playwright install chromium
+WORKDIR /app
 
 # Storage
 USER root
