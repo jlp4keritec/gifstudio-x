@@ -1,4 +1,5 @@
 import type { AxiosResponse } from 'axios';
+import type { Response } from 'express';
 import type { Readable } from 'node:stream';
 import { safeAxiosStream } from '../lib/safe-fetch';
 
@@ -64,4 +65,22 @@ export async function fetchRemoteImage(imageUrl: string): Promise<FetchedImage> 
     contentType,
     contentLength,
   };
+}
+
+/**
+ * Proxy une image distante directement vers une Response Express.
+ * - Utilise fetchRemoteImage (qui passe par safeAxiosStream, validation SSRF + DNS rebinding).
+ * - Pose les headers Content-Type / Content-Length / Cache-Control.
+ * - Pipe le stream vers la response.
+ *
+ * Utilise par /admin/crawler/results/:id/thumbnail.
+ */
+export async function proxyImage(imageUrl: string, res: Response): Promise<void> {
+  const { stream, contentType, contentLength } = await fetchRemoteImage(imageUrl);
+  res.setHeader('Content-Type', contentType);
+  if (contentLength !== null) {
+    res.setHeader('Content-Length', String(contentLength));
+  }
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  stream.pipe(res);
 }

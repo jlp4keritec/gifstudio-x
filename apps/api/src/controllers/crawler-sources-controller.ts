@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 
 import { prisma } from '../lib/prisma';
 import { AppError } from '../middlewares/error-handler';
@@ -139,7 +140,7 @@ export async function createSource(req: Request, res: Response, next: NextFuncti
       data: {
         ...data,
         createdById: req.user.userId,
-      },
+      } as Prisma.CrawlerSourceUncheckedCreateInput,
     });
     res.status(201).json({
       success: true,
@@ -170,7 +171,7 @@ export async function updateSource(req: Request, res: Response, next: NextFuncti
 
     const updated = await prisma.crawlerSource.update({
       where: { id },
-      data: patch,
+      data: patch as Prisma.CrawlerSourceUncheckedUpdateInput,
     });
     res.json({ success: true, data: { source: serializeSource(updated) } });
   } catch (err) {
