@@ -65,8 +65,8 @@ function Invoke-Ssh {
 }
 
 # ============================================================================
-Write-Step "1. Pull derniers changements"
-$pullOut = Invoke-Ssh -Command "cd $AppRoot && git pull"
+Write-Step "1. Pull derniers changements (fetch + reset --hard origin/main)"
+$pullOut = Invoke-Ssh -Command "cd $AppRoot && git fetch origin main && git reset --hard origin/main"
 Write-Info $pullOut
 Write-OK "Code a jour"
 
@@ -119,8 +119,7 @@ if ($ready) {
 Write-Step "6. Test public"
 try {
     $r = Invoke-WebRequest -Uri "https://$Domain/api/v1/health" `
-        -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop `
-        -Headers @{ 'Authorization' = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('admin@gifstudio-x.local:H6BqhGv8=Xf&&*42')) }
+        -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
     if ($r.StatusCode -eq 200) {
         Write-OK "https://$Domain/api/v1/health -> 200"
     } else {
