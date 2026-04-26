@@ -1,0 +1,43 @@
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/coverage
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# Tests / dev
+**/*.test.ts
+**/*.spec.ts
+
+# Storage local (donnees)
+**/storage/
+**/uploads/
+
+# Env locaux (les vraies valeurs viennent de docker-compose)
+.env
+.env.*
+!.env.production.example
+
+# Logs
+**/*.log
+
+# Docs/scripts non requis pour le build
+docs/
+DEPLOY-*.md
+*.md
+patch-*.ps1
+
+# Backup files Windows
+**/* - Copie.*
+**/*Old.*
+
+# Fichiers de migration anciens
+apps/api/scripts/
+
+# Fichiers OS
+.DS_Store
+Thumbs.db
