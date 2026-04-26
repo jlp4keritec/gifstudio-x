@@ -59,7 +59,8 @@ services:
     networks:
       - gifstudio-x-network
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4000/api/v1/health"]
+      # Utilise node (deja present dans l'image) au lieu de wget (absent de node:22-bookworm-slim).
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/api/v1/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
