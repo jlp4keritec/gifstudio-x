@@ -253,3 +253,35 @@ model CrawlerResult {
   @@index([discoveredAt(sort: Desc)])
   @@map("crawler_results")
 }
+
+// [Patch H-06] Rate-limit en BDD (resiste aux redemarrages)
+model LoginAttempt {
+  id             String    @id @default(uuid()) @db.Uuid
+  attemptKey     String    @unique @map("attempt_key") @db.VarChar(64)
+  count          Int       @default(1)
+  firstAttemptAt DateTime  @default(now()) @map("first_attempt_at")
+  blockedUntil   DateTime? @map("blocked_until")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([attemptKey])
+  @@index([blockedUntil])
+  @@map("login_attempts")
+}
+
+// [Patch H-07] Audit log : tracabilite des actions sensibles
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String   @db.VarChar(100)
+  resource  String?  @db.VarChar(255)
+  ipHash    String?  @map("ip_hash") @db.VarChar(64)
+  userAgent String?  @map("user_agent") @db.VarChar(500)
+  payload   Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_logs")
+}

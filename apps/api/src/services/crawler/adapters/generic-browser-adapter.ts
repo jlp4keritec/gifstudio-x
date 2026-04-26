@@ -1,4 +1,5 @@
-import type { Browser, BrowserContext, Page, Request as PwRequest } from 'playwright';
+import type { Browser, BrowserContext, Page, Request as PwRequest } from 'playwright';
+import { assertPublicUrl } from '../../../lib/url-security';
 import type {
   CrawlerAdapter,
   CrawlerAdapterContext,
@@ -87,10 +88,18 @@ async function getBrowser(): Promise<Browser> {
     const { chromium } = await import('playwright');
     const browser = await chromium.launch({
       headless: true,
+      // [Patch HX-05] --no-sandbox retire ; sandbox utilisateur active
       args: [
-        '--no-sandbox',
         '--disable-blink-features=AutomationControlled',
         '--disable-dev-shm-usage',
+        '--disable-extensions',
+        '--disable-plugins',
+        '--disable-software-rasterizer',
+        '--mute-audio',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-features=IsolateOrigins,site-per-process,TranslateUI',
+        '--disable-background-networking',
       ],
     });
     cachedBrowser = browser;
@@ -210,6 +219,18 @@ async function capturePage(
   }
 
   // Navigation
+  // [Patch HX-02/04] Bloquer toute requete vers un host prive (anti-SSRF Playwright)
+  await page.route('**/*', async (route) => {
+    const reqUrl = route.request().url();
+    try {
+      assertPublicUrl(reqUrl);
+      await route.continue();
+    } catch {
+      console.warn(`[generic_browser] requete bloquee vers host prive : ${reqUrl}`);
+      await route.abort('blockedbyclient');
+    }
+  });
+
   await page.goto(url, {
     waitUntil: 'domcontentloaded',
     timeout: FETCH_NAV_TIMEOUT_MS,

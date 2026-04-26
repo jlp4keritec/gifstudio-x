@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { safeAxiosGet } from '../../../lib/safe-fetch';
 import * as cheerio from 'cheerio';
 import type {
   CrawlerAdapter,
@@ -73,7 +74,7 @@ function assertPublicUrl(url: string): URL {
 // ============================================================================
 
 async function fetchHtmlPage(url: string): Promise<string> {
-  const response = await axios.get<string>(url, {
+  const response = await safeAxiosGet<string>(url, {
     timeout: FETCH_TIMEOUT_MS,
     maxRedirects: 5,
     maxContentLength: MAX_HTML_BYTES,

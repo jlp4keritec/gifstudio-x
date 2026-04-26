@@ -2,11 +2,12 @@ import { Router } from 'express';
 import * as videosController from '../controllers/videos-controller';
 import { requireAuth } from '../middlewares/auth';
 import { videoAssetUpload } from '../middlewares/video-asset-upload';
+import { streamingRateLimiter } from '../middlewares/rate-limit';
 
 const router = Router();
 
 // Endpoint PUBLIC (sans auth) : streaming du fichier video par slug.
-router.get('/file/:slug', videosController.getVideoFileBySlug);
+router.get('/file/:slug', streamingRateLimiter, videosController.getVideoFileBySlug);
 
 // Toutes les autres routes : auth requise
 router.get('/', requireAuth, videosController.listVideos);
