@@ -2,7 +2,10 @@
   Warnings:
 
   - A unique constraint covering the columns `[share_slug]` on the table `video_assets` will be added. If there are existing duplicate values, this will fail.
-
+  -- NOTE: l'index unique sur video_assets.share_slug est deja cree par la migration
+  --       20260426150000_add_video_share_slug. La ligne CREATE UNIQUE INDEX a la fin
+  --       de cette migration etait un doublon genere par erreur (drift detection
+  --       de prisma migrate dev) et a ete supprimee pour eviter le conflit 42P07.
 */
 -- AlterTable
 ALTER TABLE "user_settings" ALTER COLUMN "id" DROP DEFAULT;
@@ -51,6 +54,3 @@ CREATE INDEX "audit_logs_action_idx" ON "audit_logs"("action");
 
 -- CreateIndex
 CREATE INDEX "audit_logs_created_at_idx" ON "audit_logs"("created_at" DESC);
-
--- CreateIndex
-CREATE UNIQUE INDEX "video_assets_share_slug_key" ON "video_assets"("share_slug");
